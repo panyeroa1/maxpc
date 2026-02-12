@@ -168,3 +168,17 @@ export async function POST() {
     setCreateBrowserInFlight(false);
   }
 }
+
+export async function GET() {
+  const session = getLatestBrowserSession();
+  if (session) {
+    return NextResponse.json({
+      success: true,
+      ...session,
+    });
+  }
+  return NextResponse.json(
+    { success: false, error: "No active session" },
+    { status: 404 }
+  );
+}

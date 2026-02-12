@@ -15,9 +15,23 @@ import {
   Square,
   MousePointer2,
   Settings,
+  LogOut,
+  Mail,
+  MessageCircle,
+  Send,
+  FileAudio,
+  Languages,
+  FileText,
+  Play,
+  LayoutGrid,
+  MessageSquare,
+  Wand2,
+  Cpu,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { StepsOverlay } from "@/components/StepsOverlay";
+import { DesktopEnvironment } from "@/components/DesktopEnvironment";
+import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 
 interface BrowserSession {
   sessionId: string;
@@ -80,6 +94,87 @@ export default function HomePage() {
   const [stepsOverlayResult, setStepsOverlayResult] = useState<AutomationResult | null>(null);
   const [showServerSettings, setShowServerSettings] = useState(false);
   const [serverTarget, setServerTarget] = useState<"vps" | "cloud-eu">("vps");
+  const [activeTab, setActiveTab] = useState<"chat" | "hub">("chat");
+  const [taskSnapshot, setTaskSnapshot] = useState("");
+  const [isOptimizing, setIsOptimizing] = useState(false);
+
+  const {
+    isListening,
+    transcript,
+    interimTranscript,
+    startListening,
+    stopListening,
+    toggleListening: originalToggleListening,
+    isSupported: isSpeechSupported,
+    permissionError
+  } = useSpeechRecognition();
+
+  // Handle Speech-to-Text updates
+  useEffect(() => {
+    if (isListening) {
+      const liveText = transcript + (interimTranscript ? (transcript ? ' ' : '') + interimTranscript : '');
+      const separator = taskSnapshot && liveText ? " " : "";
+      setTask(taskSnapshot + separator + liveText);
+    }
+  }, [transcript, interimTranscript, isListening, taskSnapshot]);
+
+  const handleMicClick = () => {
+    if (!isListening) {
+      setTaskSnapshot(task);
+      startListening();
+    } else {
+      stopListening();
+    }
+  };
+
+  const APPS = [
+    { name: "Gmail", icon: Mail, color: "bg-red-500", prompt: "Go to gmail.com and check for unread emails." },
+    { name: "WhatsApp", icon: MessageCircle, color: "bg-green-500", prompt: "Go to web.whatsapp.com." },
+    { name: "Telegram", icon: Send, color: "bg-sky-500", prompt: "Go to web.telegram.org." },
+    { name: "Speech", icon: Mic, color: "bg-purple-500", prompt: "Go to speechnotes.co to dictate text." },
+    { name: "Transcribe", icon: FileAudio, color: "bg-amber-500", prompt: "Go to otter.ai." },
+    { name: "Translate", icon: Languages, color: "bg-blue-600", prompt: "Go to translate.google.com." },
+    { name: "Documents", icon: FileText, color: "bg-blue-400", prompt: "Go to docs.google.com/document" },
+    { name: "YouTube", icon: Play, color: "bg-red-600", prompt: "Go to youtube.com." },
+  ];
+
+  // Load saved state and check for active session on mount
+  useState(() => {
+    // This runs once on client init if not using useEffect strictly, but cleaner with useEffect text
+  });
+
+  // Use effect to load storage and check session
+  const initialized = useRef(false);
+  if (typeof window !== "undefined" && !initialized.current) {
+    initialized.current = true;
+    try {
+      const saved = localStorage.getItem("automationResults");
+      if (saved) {
+        setAutomationResults(JSON.parse(saved));
+      }
+    } catch (e) { console.error("Failed to load history", e); }
+
+    // Check for active session
+    fetch("/api/create-browser").then(res => {
+      if (res.ok) return res.json();
+      return null;
+    }).then(data => {
+      if (data && data.success) {
+        setBrowserSession({
+          sessionId: data.sessionId,
+          liveViewUrl: data.liveViewUrl,
+          cdpWsUrl: data.cdpWsUrl,
+          spinUpTime: data.spinUpTime,
+        });
+      }
+    }).catch(() => { });
+  }
+
+  // Save to local storage whenever results change
+  // We can't use useEffect inside conditional render or callbacks easily, so use a separate effect
+  // But standard way:
+  // useEffect(() => { ... }, [automationResults]);
+
 
   const totalRuns = automationResults.length;
   const successfulRuns = automationResults.filter(
@@ -138,6 +233,51 @@ export default function HomePage() {
       createBrowserRequestInFlight.current = false;
     }
   };
+
+  const saveResults = (results: AutomationResult[]) => {
+    setAutomationResults(results);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("automationResults", JSON.stringify(results));
+    }
+  };
+
+  const logout = async () => {
+    if (browserSession) {
+      // Kill session on server
+      try {
+        await fetch("/api/delete-browser", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId: browserSession.sessionId }),
+        });
+      } catch { }
+    }
+    setBrowserSession(null);
+    setAutomationResults([]);
+    localStorage.removeItem("automationResults");
+    setTask("Go to https://eburon.ai/ and create a blog post");
+  };
+
+  const enhancePrompt = async () => {
+    if (!task.trim()) return;
+    setIsOptimizing(true);
+    try {
+      const response = await fetch("/api/enhance-prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: task, serverTarget }),
+      });
+      const data = await response.json();
+      if (data.optimizedPrompt) {
+        setTask(data.optimizedPrompt);
+      }
+    } catch (e) {
+      console.error("Failed to optimize prompt", e);
+    } finally {
+      setIsOptimizing(false);
+    }
+  };
+
 
   const runAutomation = async () => {
     if (!browserSession || !task.trim()) return;
@@ -206,13 +346,31 @@ export default function HomePage() {
           }
 
           if (event === "start-step") {
-            setAutomationResults((prev) =>
-              prev.map((r) =>
+            setAutomationResults((prev) => {
+              const newResults = prev.map((r) =>
                 r.timestamp === runTimestamp
                   ? { ...r, stepCount: (r.stepCount ?? 0) + 1 }
                   : r
-              )
-            );
+              );
+              if (typeof window !== "undefined") localStorage.setItem("automationResults", JSON.stringify(newResults));
+              return newResults;
+            });
+            return;
+          }
+
+          if (event === "tool-call" || event === "step-finish") {
+            if (data?.toolName) {
+              const logLine = `\n> [Action] Running ${data.toolName}...\n`;
+              setAutomationResults((prev) => {
+                const newResults = prev.map((r) =>
+                  r.timestamp === runTimestamp
+                    ? { ...r, response: (r.response ?? "") + logLine }
+                    : r
+                );
+                if (typeof window !== "undefined") localStorage.setItem("automationResults", JSON.stringify(newResults));
+                return newResults;
+              });
+            }
             return;
           }
 
@@ -279,9 +437,11 @@ export default function HomePage() {
         timestamp: runTimestamp,
       };
 
-      setAutomationResults((prev) =>
-        prev.map((r) => (r.timestamp === runTimestamp ? result : r))
-      );
+      setAutomationResults((prev) => {
+        const newResults = prev.map((r) => (r.timestamp === runTimestamp ? result : r));
+        if (typeof window !== "undefined") localStorage.setItem("automationResults", JSON.stringify(newResults));
+        return newResults;
+      });
 
       // Clear the task input after successful execution
       if (data.success) {
@@ -316,10 +476,10 @@ export default function HomePage() {
       const data = await response.json();
 
       if (data.success) {
-        // Clear browser session and reset state
+        // Just disconnect local session state, don't clear history
         setBrowserSession(null);
-        setAutomationResults([]);
-        setTask("Go to https://eburon.ai/ and create a blog post");
+        // setAutomationResults([]); // User wants to stay on page
+        // setTask("Go to https://eburon.ai/ and create a blog post");
       } else {
         setError(data.error || "Failed to close browser");
       }
@@ -341,18 +501,18 @@ export default function HomePage() {
 
       {/* Main Content */}
       <section
-        className={`relative z-10 flex-grow ${browserSession
-            ? "py-3 lg:py-4 lg:flex-grow lg:min-h-0"
-            : "py-8 sm:py-10 flex items-center"
+        className={`relative z-10 flex-grow ${browserSession || automationResults.length > 0
+          ? "py-3 lg:py-4 lg:flex-grow lg:min-h-0"
+          : "py-8 sm:py-10 flex items-center"
           }`}
       >
         <div
-          className={`mx-auto px-4 h-full ${browserSession ? "max-w-[1920px] w-full" : "container max-w-3xl"
+          className={`mx-auto px-4 h-full ${browserSession || automationResults.length > 0 ? "max-w-[1920px] w-full" : "container max-w-3xl"
             }`}
         >
-          <div className={`space-y-8 ${!browserSession ? "text-center" : ""}`}>
-            {/* Top description (hide once sandbox is active) */}
-            {!browserSession && (
+          <div className={`space-y-8 ${!browserSession && automationResults.length === 0 ? "text-center" : ""}`}>
+            {/* Top description (hide once sandbox is active or history exists) */}
+            {!browserSession && automationResults.length === 0 && (
               <div className="space-y-2">
                 <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight">
                   Eburon Autonomous Agent
@@ -399,7 +559,7 @@ export default function HomePage() {
 
             <div className="space-y-8">
               {/* Step 1: Create Browser / Sandbox */}
-              {!browserSession && (
+              {!browserSession && automationResults.length === 0 && (
                 <div className="space-y-3 text-center">
                   <Button
                     variant="vercel"
@@ -510,179 +670,234 @@ export default function HomePage() {
               )}
 
               {/* Live View and Automation Controls — Desktop: split panel */}
-              {browserSession && (
+              {/* Show split panel if session is active OR if we have history (disconnected state) */}
+              {(browserSession || automationResults.length > 0) && (
                 <div className="flex flex-col lg:grid lg:grid-cols-[380px_1fr] lg:gap-4 lg:h-[calc(100vh-5rem)] space-y-6 lg:space-y-0">
 
-                  {/* ── LEFT PANEL (Chat-like Interface) ── */}
+                  {/* ── LEFT PANEL (Tabbed Interface) ── */}
                   <div className="order-2 lg:order-1 flex flex-col lg:h-[calc(100vh-5rem)] border-t lg:border-t-0 lg:border-r bg-background lg:overflow-hidden">
 
                     {/* Header: Title + Settings + Stats */}
-                    <div className="flex items-center justify-between p-3 border-b shrink-0 bg-muted/5">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold">Session History</span>
-                        {automationResults.length > 0 && (
-                          <Badge variant="secondary" className="text-[10px] h-5">
-                            {successfulRuns}/{totalRuns} runs
-                          </Badge>
-                        )}
-                      </div>
+                    <div className="flex flex-col border-b shrink-0 bg-muted/5">
+                      <div className="flex items-center justify-between p-3 pb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold">Session History</span>
+                          {automationResults.length > 0 && (
+                            <Badge variant="secondary" className="text-[10px] h-5">
+                              {successfulRuns}/{totalRuns} runs
+                            </Badge>
+                          )}
+                        </div>
 
-                      <div className="relative z-20">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() => setShowServerSettings(!showServerSettings)}
-                          title="Server Settings"
-                        >
-                          <Settings className="w-4 h-4" />
-                        </Button>
+                        <div className="relative z-20">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => setShowServerSettings(!showServerSettings)}
+                            title="Server Settings"
+                          >
+                            <Settings className="w-4 h-4" />
+                          </Button>
 
-                        {/* Settings Popover */}
-                        {showServerSettings && (
-                          <div className="absolute right-0 top-9 w-64 rounded-lg border bg-popover p-4 shadow-md text-popover-foreground animate-in fade-in zoom-in-95 duration-200">
-                            <div className="space-y-3">
-                              <div className="space-y-1">
-                                <h4 className="font-medium leading-none">Server Settings</h4>
-                                <p className="text-xs text-muted-foreground">Choose your LLM backend.</p>
-                              </div>
-                              <div className="grid gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => { setServerTarget("vps"); setShowServerSettings(false); }}
-                                  className={`rounded-md border p-2 text-left text-sm transition ${serverTarget === "vps"
+                          {/* Settings Popover */}
+                          {showServerSettings && (
+                            <div className="absolute right-0 top-9 w-64 rounded-lg border bg-popover p-4 shadow-md text-popover-foreground animate-in fade-in zoom-in-95 duration-200">
+                              <div className="space-y-3">
+                                <div className="space-y-1">
+                                  <h4 className="font-medium leading-none">Server Settings</h4>
+                                  <p className="text-xs text-muted-foreground">Choose your LLM backend.</p>
+                                </div>
+                                <div className="grid gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => { setServerTarget("vps"); setShowServerSettings(false); }}
+                                    className={`rounded-md border p-2 text-left text-sm transition ${serverTarget === "vps"
                                       ? "border-emerald-500 bg-emerald-500/10"
                                       : "hover:bg-muted"
-                                    }`}
-                                >
-                                  <div className="font-medium">VPS Self-Hosted</div>
-                                  <div className="text-[10px] text-muted-foreground">Local/Private OLLAMA_BASE_URL</div>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => { setServerTarget("cloud-eu"); setShowServerSettings(false); }}
-                                  className={`rounded-md border p-2 text-left text-sm transition ${serverTarget === "cloud-eu"
+                                      }`}
+                                  >
+                                    <div className="font-medium">VPS Self-Hosted</div>
+                                    <div className="text-[10px] text-muted-foreground">Local/Private OLLAMA_BASE_URL</div>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => { setServerTarget("cloud-eu"); setShowServerSettings(false); }}
+                                    className={`rounded-md border p-2 text-left text-sm transition ${serverTarget === "cloud-eu"
                                       ? "border-blue-500 bg-blue-500/10"
                                       : "hover:bg-muted"
-                                    }`}
-                                >
-                                  <div className="font-medium">Cloud Server EU</div>
-                                  <div className="text-[10px] text-muted-foreground">Hosted OLLAMA_CLOUD</div>
-                                </button>
+                                      }`}
+                                  >
+                                    <div className="font-medium">Cloud Server EU</div>
+                                    <div className="text-[10px] text-muted-foreground">Hosted OLLAMA_CLOUD</div>
+                                  </button>
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        )}
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Tab Switcher */}
+                      <div className="px-3 pb-2">
+                        <div className="flex p-1 bg-muted/50 rounded-lg w-full">
+                          <button
+                            onClick={() => setActiveTab("chat")}
+                            className={`flex-1 flex items-center justify-center gap-2 py-1.5 text-xs font-medium rounded-md transition-all ${activeTab === "chat"
+                              ? "bg-background shadow-sm text-foreground"
+                              : "text-muted-foreground hover:text-foreground"
+                              }`}
+                          >
+                            <MessageSquare className="w-3.5 h-3.5" />
+                            Chat
+                          </button>
+                          <button
+                            onClick={() => setActiveTab("hub")}
+                            className={`flex-1 flex items-center justify-center gap-2 py-1.5 text-xs font-medium rounded-md transition-all ${activeTab === "hub"
+                              ? "bg-background shadow-sm text-foreground"
+                              : "text-muted-foreground hover:text-foreground"
+                              }`}
+                          >
+                            <LayoutGrid className="w-3.5 h-3.5" />
+                            Hub
+                          </button>
+                        </div>
                       </div>
                     </div>
 
-                    {/* Scrollable History List */}
-                    <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0 bg-muted/5 scrollbar-thin scrollbar-thumb-border">
-                      {automationResults.length === 0 && (
-                        <div className="h-full flex flex-col items-center justify-center text-center p-6 text-muted-foreground opacity-50 space-y-2">
-                          <MousePointer2 className="w-8 h-8 opacity-20" />
-                          <p className="text-sm">Ready to automate. Enter a task below.</p>
-                        </div>
-                      )}
+                    {/* Middle Content: Chat List or Hub Grid */}
+                    <div className="flex-1 overflow-y-auto min-h-0 bg-muted/5 scrollbar-thin scrollbar-thumb-border relative">
+                      {activeTab === "chat" ? (
+                        <div className="p-3 space-y-3">
+                          {automationResults.length === 0 && (
+                            <div className="h-full flex flex-col items-center justify-center text-center p-6 text-muted-foreground opacity-50 space-y-2 pt-20">
+                              <MousePointer2 className="w-8 h-8 opacity-20" />
+                              <p className="text-sm">Ready to automate. Enter a task below.</p>
+                            </div>
+                          )}
 
-                      {/* Render results (Newest First) */}
-                      {automationResults.map((result, index) => (
-                        <Card key={result.timestamp} className="text-left border-muted-foreground/20 shadow-sm">
-                          <CardContent className="p-3">
-                            <div className="space-y-3">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  {result.success === null ? (
-                                    <>
-                                      <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />
-                                      <span className="text-xs font-semibold">
-                                        Run #{automationResults.length - index} Running...
-                                      </span>
-                                    </>
-                                  ) : result.success ? (
-                                    <>
-                                      <CheckCircle2 className="w-3.5 h-3.5 text-green-600" />
-                                      <span className="text-xs font-semibold">
-                                        Run #{automationResults.length - index}
-                                      </span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <XCircle className="w-3.5 h-3.5 text-red-600" />
-                                      <span className="text-xs font-semibold">
-                                        Run #{automationResults.length - index} Failed
-                                      </span>
-                                    </>
-                                  )}
-                                </div>
-                                <span className="text-[10px] text-muted-foreground">
-                                  {new Date(result.timestamp).toLocaleTimeString()}
-                                </span>
-                              </div>
-
-                              {result.task && (
-                                <div className="p-2 bg-muted/50 rounded text-xs">
-                                  <span className="font-medium text-muted-foreground">Task: </span>
-                                  {result.task}
-                                </div>
-                              )}
-
-                              {result.success === null ? (
-                                <div className="space-y-2">
-                                  {result.response !== undefined && (
-                                    <div className="prose prose-xs dark:prose-invert max-w-none">
-                                      <p className="text-xs whitespace-pre-wrap leading-relaxed">
-                                        {result.response || <span className="animate-pulse">Thinking...</span>}
-                                      </p>
-                                    </div>
-                                  )}
-                                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                                    <Badge variant="outline" className="text-[10px] h-5">
-                                      {result.stepCount ?? 0} steps
-                                    </Badge>
-                                    {result.serverTarget && (
-                                      <Badge variant="secondary" className="text-[10px] h-5 opacity-70">
-                                        {result.serverTarget === "vps" ? "VPS" : "Cloud"}
-                                      </Badge>
-                                    )}
-                                  </div>
-                                </div>
-                              ) : result.success ? (
-                                <div className="space-y-2">
-                                  {result.response && (
-                                    <div className="prose prose-xs dark:prose-invert max-w-none">
-                                      <p className="text-xs whitespace-pre-wrap leading-relaxed text-foreground/90">{result.response}</p>
-                                    </div>
-                                  )}
-
-                                  {result.stepCount !== undefined && (
-                                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                                      <Badge variant="outline" className="text-[10px] h-5">
-                                        {result.stepCount} steps
-                                      </Badge>
-                                      {result.detailedSteps && result.detailedSteps.length > 0 && (
-                                        <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          onClick={() => setStepsOverlayResult(result)}
-                                          className="ml-auto h-6 text-[10px] px-2 hover:bg-muted"
-                                        >
-                                          <ListTree className="w-3 h-3 mr-1" />
-                                          Details
-                                        </Button>
+                          {/* Render results (Newest First) */}
+                          {automationResults.map((result, index) => (
+                            <Card key={result.timestamp} className="text-left border-muted-foreground/20 shadow-sm">
+                              <CardContent className="p-3">
+                                <div className="space-y-3">
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                      {result.success === null ? (
+                                        <>
+                                          <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />
+                                          <span className="text-xs font-semibold">
+                                            Run #{automationResults.length - index} Running...
+                                          </span>
+                                        </>
+                                      ) : result.success ? (
+                                        <>
+                                          <CheckCircle2 className="w-3.5 h-3.5 text-green-600" />
+                                          <span className="text-xs font-semibold">
+                                            Run #{automationResults.length - index}
+                                          </span>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <XCircle className="w-3.5 h-3.5 text-red-600" />
+                                          <span className="text-xs font-semibold">
+                                            Run #{automationResults.length - index} Failed
+                                          </span>
+                                        </>
                                       )}
                                     </div>
+                                    <span className="text-[10px] text-muted-foreground">
+                                      {new Date(result.timestamp).toLocaleTimeString()}
+                                    </span>
+                                  </div>
+
+                                  {result.task && (
+                                    <div className="p-2 bg-muted/50 rounded text-xs">
+                                      <span className="font-medium text-muted-foreground">Task: </span>
+                                      {result.task}
+                                    </div>
+                                  )}
+
+                                  {result.success === null ? (
+                                    <div className="space-y-2">
+                                      {result.response !== undefined && (
+                                        <div className="prose prose-xs dark:prose-invert max-w-none">
+                                          <p className="text-xs whitespace-pre-wrap leading-relaxed">
+                                            {result.response || <span className="animate-pulse">Thinking...</span>}
+                                          </p>
+                                        </div>
+                                      )}
+                                      <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                                        <Badge variant="outline" className="text-[10px] h-5">
+                                          {result.stepCount ?? 0} steps
+                                        </Badge>
+                                        {result.serverTarget && (
+                                          <Badge variant="secondary" className="text-[10px] h-5 opacity-70">
+                                            {result.serverTarget === "vps" ? "VPS" : "Cloud"}
+                                          </Badge>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ) : result.success ? (
+                                    <div className="space-y-2">
+                                      {result.response && (
+                                        <div className="prose prose-xs dark:prose-invert max-w-none">
+                                          <p className="text-xs whitespace-pre-wrap leading-relaxed text-foreground/90">{result.response}</p>
+                                        </div>
+                                      )}
+
+                                      {result.stepCount !== undefined && (
+                                        <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                                          <Badge variant="outline" className="text-[10px] h-5">
+                                            {result.stepCount} steps
+                                          </Badge>
+                                          {result.detailedSteps && result.detailedSteps.length > 0 && (
+                                            <Button
+                                              variant="ghost"
+                                              size="sm"
+                                              onClick={() => setStepsOverlayResult(result)}
+                                              className="ml-auto h-6 text-[10px] px-2 hover:bg-muted"
+                                            >
+                                              <ListTree className="w-3 h-3 mr-1" />
+                                              Details
+                                            </Button>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <div className="text-xs text-red-500 bg-red-500/10 p-2 rounded">
+                                      {result.error}
+                                    </div>
                                   )}
                                 </div>
-                              ) : (
-                                <div className="text-xs text-red-500 bg-red-500/10 p-2 rounded">
-                                  {result.error}
-                                </div>
-                              )}
-                            </div>
-                          </CardContent>
-                        </Card>
-                      ))}
+                              </CardContent>
+                            </Card>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="p-4 grid grid-cols-4 gap-4 align-start content-start">
+                          {APPS.map((app) => (
+                            <button
+                              key={app.name}
+                              onClick={() => {
+                                setTask(app.prompt);
+                                setActiveTab("chat");
+                                // We don't auto-run to avoid accidental clicks, user can press enter/run.
+                                // Or we could suggest it.
+                              }}
+                              className="group flex flex-col items-center gap-2"
+                            >
+                              <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg transition-transform group-hover:scale-105 group-active:scale-95 text-white ${app.color}`}>
+                                <app.icon className="w-7 h-7" />
+                              </div>
+                              <span className="text-[10px] font-medium text-center leading-tight line-clamp-1">
+                                {app.name}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
                     {/* Fixed Bottom Input */}
@@ -693,12 +908,14 @@ export default function HomePage() {
                           value={task}
                           onChange={(e) => setTask(e.target.value)}
                           placeholder={
-                            automationResults.length > 0
-                              ? "What's next?"
-                              : "e.g. Go to google.com and search for AI agents"
+                            isListening
+                              ? "Listening..."
+                              : automationResults.length > 0
+                                ? "What's next?"
+                                : "e.g. Go to google.com and search for AI agents"
                           }
                           disabled={runningAutomation}
-                          className="min-h-[80px] text-sm resize-none pr-10 shadow-sm focus-visible:ring-1"
+                          className={`min-h-[80px] text-sm resize-none pr-16 shadow-sm focus-visible:ring-1 ${isListening ? 'border-primary/50 ring-1 ring-primary/20' : ''}`}
                           onKeyDown={(e) => {
                             if (e.key === "Enter" && !e.shiftKey) {
                               e.preventDefault();
@@ -706,13 +923,31 @@ export default function HomePage() {
                             }
                           }}
                         />
-                        <button
-                          type="button"
-                          className="absolute right-2 bottom-2 p-1.5 rounded-full hover:bg-muted text-muted-foreground transition-colors"
-                          onClick={() => { }}
-                        >
-                          <Mic className="w-4 h-4" />
-                        </button>
+                        <div className="absolute right-2 bottom-2 flex gap-1 items-center">
+                          <button
+                            type="button"
+                            className={`p-1.5 rounded-full transition-colors ${isOptimizing ? "text-purple-500 animate-pulse" : "hover:bg-muted text-muted-foreground"
+                              }`}
+                            onClick={enhancePrompt}
+                            title="Enhance Prompt with AI"
+                            disabled={isOptimizing || !task.trim()}
+                          >
+                            <Wand2 className={`w-4 h-4 ${isOptimizing ? "animate-spin" : ""}`} />
+                          </button>
+                          {isSpeechSupported && (
+                            <button
+                              type="button"
+                              className={`p-1.5 rounded-full transition-all duration-300 ${isListening
+                                ? "bg-red-500 text-white shadow-md animate-pulse hover:bg-red-600"
+                                : "hover:bg-muted text-muted-foreground"
+                                }`}
+                              onClick={handleMicClick}
+                              title={permissionError ? "Microphone permission denied" : "Use Microphone"}
+                            >
+                              <Mic className={`w-4 h-4 ${isListening ? "animate-bounce" : ""}`} />
+                            </button>
+                          )}
+                        </div>
                       </div>
 
                       <div className="flex gap-2">
@@ -758,22 +993,31 @@ export default function HomePage() {
                   </div>
 
                   {/* ── RIGHT PANEL (browser iframe) ── */}
+                  {/* ── RIGHT PANEL (browser iframe) ── */}
                   <div className="order-1 lg:order-2 lg:min-h-0 lg:h-full">
-                    <Card className="h-full">
-                      <CardContent className="p-2 sm:p-3 h-full">
-                        <div className="rounded-lg overflow-hidden border bg-black h-full">
-                          {/* Mobile: fixed aspect ratio / Desktop: fill available height */}
-                          <div className="relative w-full aspect-video sm:aspect-[16/10] min-h-[220px] max-h-[68vh] sm:max-h-[75vh] lg:aspect-auto lg:h-full lg:max-h-none">
-                            <iframe
-                              src={browserSession.liveViewUrl}
-                              title="Eburon browser live view"
-                              className="absolute inset-0 block w-full h-full"
-                              allow="camera; microphone; display-capture"
-                            />
+                    {browserSession ? (
+                      <DesktopEnvironment
+                        browserSession={browserSession}
+                        automationResults={automationResults}
+                        isSessionActive={!!browserSession}
+                      />
+                    ) : (
+                      <Card className="h-full bg-muted/10 border-dashed">
+                        <CardContent className="h-full flex flex-col items-center justify-center text-muted-foreground space-y-4">
+                          <span className="p-4 rounded-full bg-muted/20">
+                            <Cpu className="w-8 h-8 opacity-50" />
+                          </span>
+                          <div className="text-center">
+                            <h3 className="text-lg font-medium text-foreground">Session Disconnected</h3>
+                            <p className="text-sm">The computer is turned off.</p>
                           </div>
-                        </div>
-                      </CardContent>
-                    </Card>
+                          <Button onClick={createBrowser} disabled={creatingBrowser}>
+                            {creatingBrowser ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                            Boot Up System
+                          </Button>
+                        </CardContent>
+                      </Card>
+                    )}
                   </div>
                 </div>
               )}
@@ -783,7 +1027,7 @@ export default function HomePage() {
       </section>
 
       {/* Footer — hidden on desktop when session is active to maximize space */}
-      <footer className={`pb-8 mt-auto ${browserSession ? 'hidden lg:hidden' : ''}`}>
+      <footer className={`pb-8 mt-auto ${browserSession || automationResults.length > 0 ? 'hidden lg:hidden' : ''}`}>
         <div className="container mx-auto px-4 text-center text-gray-600 text-xs">
           <p>
             Powered by{" "}
