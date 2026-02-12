@@ -27,8 +27,10 @@ interface StepContentItem {
   toolCallId?: string;
   toolName?: string;
   code?: string;
+  input?: any;
   result?: any;
   success?: boolean;
+  error?: any;
   text?: string;
 }
 
@@ -180,6 +182,74 @@ function StepCard({ step, isLast }: { step: DetailedStep; isLast: boolean }) {
                       </div>
                       <pre className="p-3 text-sm font-mono text-gray-200 overflow-x-auto whitespace-pre-wrap">
                         {execution.toolCall.code}
+                      </pre>
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              )}
+
+              {/* Generic tool input (non-code tools) */}
+              {!execution.toolCall.code && execution.toolCall.toolName && (
+                <Collapsible defaultOpen={false}>
+                  <CollapsibleTrigger className="flex items-center gap-2 text-sm font-medium text-gray-300 hover:text-white transition-colors w-full">
+                    <ChevronDown className="w-4 h-4 transition-transform duration-200" />
+                    <Terminal className="w-4 h-4 text-purple-400" />
+                    <span>Tool Input</span>
+                    <span className="text-xs text-gray-500 font-mono ml-auto">
+                      {execution.toolCall.toolName}
+                    </span>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="mt-2">
+                    <div className="bg-white/5 rounded-lg border border-white/10 overflow-hidden">
+                      <pre className="p-3 text-xs font-mono text-gray-200 overflow-x-auto whitespace-pre-wrap">
+                        {JSON.stringify(execution.toolCall.input ?? null, null, 2)}
+                      </pre>
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              )}
+
+              {/* Tool result */}
+              {execution.toolResult && (
+                <Collapsible defaultOpen={false}>
+                  <CollapsibleTrigger className="flex items-center gap-2 text-sm font-medium text-gray-300 hover:text-white transition-colors w-full">
+                    <ChevronDown className="w-4 h-4 transition-transform duration-200" />
+                    {execution.toolResult.success === false ? (
+                      <XCircle className="w-4 h-4 text-red-400" />
+                    ) : (
+                      <CheckCircle2 className="w-4 h-4 text-green-400" />
+                    )}
+                    <span>Tool Result</span>
+                    {execution.toolResult.toolName && (
+                      <span className="text-xs text-gray-500 font-mono ml-auto">
+                        {execution.toolResult.toolName}
+                      </span>
+                    )}
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="mt-2 space-y-2">
+                    {/* Image preview (for screenshots) */}
+                    {typeof execution.toolResult.result?.dataUrl === "string" &&
+                      execution.toolResult.result.dataUrl.startsWith("data:image/") && (
+                        <div className="rounded-lg overflow-hidden border border-white/10 bg-black">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={execution.toolResult.result.dataUrl}
+                            alt="Tool result screenshot"
+                            className="block w-full"
+                          />
+                        </div>
+                      )}
+                    <div className="bg-white/5 rounded-lg border border-white/10 overflow-hidden">
+                      <pre className="p-3 text-xs font-mono text-gray-200 overflow-x-auto whitespace-pre-wrap">
+                        {JSON.stringify(
+                          {
+                            success: execution.toolResult.success ?? true,
+                            result: execution.toolResult.result ?? null,
+                            error: execution.toolResult.error ?? null,
+                          },
+                          null,
+                          2
+                        )}
                       </pre>
                     </div>
                   </CollapsibleContent>

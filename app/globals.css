@@ -98,3 +98,22 @@
     z-index: 0;
   }
 }
+
+/* Computer-use left panel scrollbar */
+.cu-left-panel {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+}
+.cu-left-panel::-webkit-scrollbar {
+  width: 4px;
+}
+.cu-left-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+.cu-left-panel::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+}
+.cu-left-panel::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
