@@ -1,4 +1,5 @@
 import { Kernel, NotFoundError } from "@onkernel/sdk";
+import { clearLatestBrowserSession } from "@/lib/browser-session-registry";
 
 export async function POST(req: Request) {
   try {
@@ -24,6 +25,7 @@ export async function POST(req: Request) {
 
     try {
       await kernel.browsers.deleteByID(sessionId);
+      clearLatestBrowserSession(sessionId);
 
       return Response.json({
         success: true,
@@ -32,6 +34,7 @@ export async function POST(req: Request) {
     } catch (error) {
       // Handle 404 gracefully - browser was already deleted or doesn't exist
       if (error instanceof NotFoundError) {
+        clearLatestBrowserSession(sessionId);
         return Response.json({
           success: true,
           message: "Browser session already closed or not found",

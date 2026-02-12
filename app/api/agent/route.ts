@@ -1,10 +1,51 @@
-import { openai } from "@ai-sdk/openai";
+import { createOpenAI } from "@ai-sdk/openai";
 import { playwrightExecuteTool } from "@onkernel/ai-sdk";
 import { Kernel } from "@onkernel/sdk";
 import { Experimental_Agent as Agent, stepCountIs, tool } from "ai";
 import { z } from "zod";
 
 export const maxDuration = 300; // 5 minutes timeout for long-running agent operations
+
+async function normalizeToSinglePage(kernel: Kernel, sessionId: string) {
+  try {
+    await kernel.browsers.playwright.execute(sessionId, {
+      timeout_sec: 20,
+      code: `
+const pages = context.pages();
+if (!pages.length) {
+  return { pageCountBefore: 0, pageCountAfter: 0 };
+}
+
+const primaryPage =
+  pages.find(
+    (p) =>
+      !p.url().startsWith("chrome-extension://") &&
+      p.url() !== "about:blank"
+  ) ?? pages[0];
+
+for (const currentPage of pages) {
+  if (currentPage !== primaryPage) {
+    try {
+      await currentPage.close();
+    } catch {}
+  }
+}
+
+try {
+  await primaryPage.bringToFront();
+} catch {}
+
+return {
+  pageCountBefore: pages.length,
+  pageCountAfter: context.pages().length,
+  primaryUrl: primaryPage.url(),
+};
+      `,
+    });
+  } catch (error) {
+    console.warn("Failed to normalize browser pages before agent run:", error);
+  }
+}
 
 export async function POST(req: Request) {
   try {
@@ -18,7 +59,9 @@ export async function POST(req: Request) {
     }
 
     const apiKey = process.env.KERNEL_API_KEY;
-    const openaiKey = process.env.OPENAI_API_KEY;
+    const ollamaBaseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434/v1";
+    const ollamaApiKey = process.env.OLLAMA_API_KEY || "ollama";
+    const ollamaModel = process.env.OLLAMA_MODEL || "kimi-k2-thinking:cloud";
 
     if (!apiKey) {
       return Response.json(
@@ -27,18 +70,17 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!openaiKey) {
-      return Response.json(
-        { error: "OPENAI_API_KEY environment variable is not set" },
-        { status: 400 }
-      );
-    }
-
     const kernel = new Kernel({ apiKey });
+    await normalizeToSinglePage(kernel, sessionId);
+    const ollama = createOpenAI({
+      baseURL: ollamaBaseUrl,
+      apiKey: ollamaApiKey,
+      name: "ollama",
+    });
 
-    // Initialize the AI agent with GPT-5.1
+    // Initialize the AI agent with an Ollama model
     const agent = new Agent({
-      model: openai("gpt-5.1"),
+      model: ollama(ollamaModel),
       tools: {
         playwright_execute: playwrightExecuteTool({
           client: kernel,
@@ -46,7 +88,7 @@ export async function POST(req: Request) {
         }),
       },
       stopWhen: stepCountIs(20),
-      system: `You are a browser automation expert with access to a Playwright execution tool.
+      system: `You are the Eburon Autonomous Agent, a browser automation expert operating inside a disposable, sandboxed environment with access to a Playwright execution tool.
 
 Available tools:
 - playwright_execute: Executes JavaScript/Playwright code in the browser. Has access to 'page', 'context', and 'browser' objects. Returns the result of your code.
@@ -56,11 +98,16 @@ When given a task:
    return { url: page.url(), title: await page.title() }
 2. If a URL is provided, navigate to it using page.goto()
 3. Use appropriate selectors (page.locator, page.getByRole, etc.) to interact with elements
-4. Always return the requested data from your code execution
+4. Safely handle authentication flows when the user explicitly provides credentials (for example, filling login forms), but never attempt to obtain or exfiltrate secrets the user did not clearly request or supply.
+5. Always return the requested data from your code execution.
+6. Keep the session to a single active browser page/tab unless the user explicitly asks for multiple tabs or popups.
+7. Never call context.newPage() or open new windows unless explicitly requested; if a popup/new tab appears, close the extra page and continue on the main page.
 
-Important: Write concise code that solves one atomic step at a time. Break complex tasks into small, focused executions rather than writing long scripts.
-
-Execute tasks autonomously without asking clarifying questions. Make reasonable assumptions and proceed.`,
+Behavior:
+- Break complex tasks into small, focused executions rather than writing long scripts.
+- After each tool call, clearly describe in natural language what you clicked, typed, or observed so users can understand the simulation steps.
+- Prefer reusing the existing page for navigation and interactions to avoid duplicate browser windows.
+- Execute tasks autonomously without asking clarifying questions when possible, making reasonable assumptions while respecting security, privacy, and website terms of service.`,
     });
 
     // Execute the agent with the user's task

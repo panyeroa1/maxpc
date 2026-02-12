@@ -2,7 +2,7 @@
 
 Next.js + Kernel template for running AI-powered browser automations with natural language on Vercel.
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fonkernel%2Fkernel-nextjs-template&env=OPENAI_API_KEY&project-name=kernel-nextjs-template&repository-name=kernel-nextjs-template&products=%5B%7B%22type%22%3A%22integration%22%2C%22integrationSlug%22%3A%22kernel%22%2C%22productSlug%22%3A%22kernel%22%2C%22protocol%22%3A%22other%22%7D%5D)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fonkernel%2Fkernel-nextjs-template&env=OLLAMA_API_KEY&project-name=kernel-nextjs-template&repository-name=kernel-nextjs-template&products=%5B%7B%22type%22%3A%22integration%22%2C%22integrationSlug%22%3A%22kernel%22%2C%22productSlug%22%3A%22kernel%22%2C%22protocol%22%3A%22other%22%7D%5D)
 
 
 ## Overview
@@ -19,7 +19,7 @@ This template shows how to:
 - **Framework**: Next.js 15 with App Router
 - **Styling**: Tailwind CSS v4
 - **UI Components**: shadcn/ui
-- **AI**: Vercel AI SDK with OpenAI GPT-5.1
+- **AI**: Vercel AI SDK with Ollama (`kimi-k2-thinking:cloud`)
 - **Browser Automation**: Kernel SDK + Kernel AI SDK (`@onkernel/ai-sdk`)
 - **Package Manager**: Bun
 - **Deployment**: Vercel
@@ -31,7 +31,7 @@ This template shows how to:
 - Node.js 18+
 - [Bun](https://bun.sh) (package manager)
 - A Kernel account and API key
-- An OpenAI API key
+- Ollama running locally on `http://localhost:11434`
 - Vercel account (optional, for deployment)
 
 ### Installation
@@ -68,7 +68,9 @@ This template shows how to:
 
    ```
    KERNEL_API_KEY=your_kernel_api_key_here
-   OPENAI_API_KEY=your_openai_api_key_here
+   OLLAMA_BASE_URL=http://localhost:11434/v1
+   OLLAMA_API_KEY=ollama
+   OLLAMA_MODEL=kimi-k2-thinking:cloud
    ```
 
 5. **Run the development server**:
@@ -141,7 +143,7 @@ return {
 **Step 2: Run AI Agent** (`app/api/agent/route.ts`)
 
 ```typescript
-import { openai } from "@ai-sdk/openai";
+import { createOpenAI } from "@ai-sdk/openai";
 import { playwrightExecuteTool } from "@onkernel/ai-sdk";
 import { Kernel } from "@onkernel/sdk";
 import { Experimental_Agent as Agent, stepCountIs } from "ai";
@@ -149,9 +151,15 @@ import { Experimental_Agent as Agent, stepCountIs } from "ai";
 // Initialize Kernel instance
 const kernel = new Kernel({ apiKey: process.env.KERNEL_API_KEY });
 
-// Initialize the AI agent with GPT-5.1 and Kernel's AI SDK-compatible browser automation tool
+const ollama = createOpenAI({
+  baseURL: process.env.OLLAMA_BASE_URL ?? "http://localhost:11434/v1",
+  apiKey: process.env.OLLAMA_API_KEY ?? "ollama",
+  name: "ollama",
+});
+
+// Initialize the AI agent with an Ollama model and Kernel's AI SDK-compatible browser automation tool
 const agent = new Agent({
-  model: openai("gpt-5.1"),
+  model: ollama(process.env.OLLAMA_MODEL ?? "kimi-k2-thinking:cloud"),
   tools: {
     playwright_execute: playwrightExecuteTool({
       client: kernel,
@@ -178,13 +186,13 @@ const { text, steps } = await agent.generate({
 
    - Go to [vercel.com](https://vercel.com)
    - Import your GitHub repository
-   - Add your environment variables (`KERNEL_API_KEY` and `OPENAI_API_KEY`)
+   - Add your environment variables (`KERNEL_API_KEY`, `OLLAMA_BASE_URL`, `OLLAMA_API_KEY`, `OLLAMA_MODEL`)
    - Deploy!
 
 3. **Using Vercel Marketplace Integration**:
    - Install [Kernel from Vercel Marketplace](https://vercel.com/integrations/kernel)
    - The integration will automatically add the Kernel API key to your project
-   - Add your `OPENAI_API_KEY` manually
+   - Add your Ollama variables manually
    - Deploy your project
 
 ### Environment Variables
@@ -192,7 +200,9 @@ const { text, steps } = await agent.generate({
 Make sure to add these environment variables in your Vercel project settings:
 
 - `KERNEL_API_KEY` - Your Kernel API key
-- `OPENAI_API_KEY` - Your OpenAI API key
+- `OLLAMA_BASE_URL` - Ollama base URL (default: `http://localhost:11434/v1`)
+- `OLLAMA_API_KEY` - Ollama API key (`ollama` is fine for localhost)
+- `OLLAMA_MODEL` - Ollama model ID (default: `kimi-k2-thinking:cloud`)
 
 ## Learn More
 
