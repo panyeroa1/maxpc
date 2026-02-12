@@ -49,7 +49,7 @@ return {
 
 export async function POST(req: Request) {
   try {
-    const { sessionId, task } = await req.json();
+    const { sessionId, task, serverTarget } = await req.json();
 
     if (!sessionId || !task) {
       return Response.json(
@@ -59,9 +59,36 @@ export async function POST(req: Request) {
     }
 
     const apiKey = process.env.KERNEL_API_KEY;
-    const ollamaBaseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434/v1";
-    const ollamaApiKey = process.env.OLLAMA_API_KEY || "ollama";
-    const ollamaModel = process.env.OLLAMA_MODEL || "kimi-k2-thinking:cloud";
+    const requestedServerTarget =
+      serverTarget === "cloud-eu" ? "cloud-eu" : "vps";
+
+    let ollamaBaseUrl: string;
+    let ollamaApiKey: string;
+    let ollamaModel: string;
+
+    if (requestedServerTarget === "cloud-eu") {
+      const cloudBaseUrl = process.env.OLLAMA_CLOUD_BASE_URL;
+      const cloudApiKey = process.env.OLLAMA_CLOUD_API_KEY;
+      if (!cloudBaseUrl || !cloudApiKey) {
+        return Response.json(
+          {
+            success: false,
+            error:
+              "Cloud Server EU selected but OLLAMA_CLOUD_BASE_URL and/or OLLAMA_CLOUD_API_KEY are not set. Add these env vars or use VPS Self-Hosted.",
+          },
+          { status: 400 }
+        );
+      }
+      ollamaBaseUrl = cloudBaseUrl;
+      ollamaApiKey = cloudApiKey || "ollama";
+      ollamaModel =
+        process.env.OLLAMA_CLOUD_MODEL || "kimi-k2-thinking:cloud";
+    } else {
+      ollamaBaseUrl =
+        process.env.OLLAMA_BASE_URL || "http://localhost:11434/v1";
+      ollamaApiKey = process.env.OLLAMA_API_KEY || "ollama";
+      ollamaModel = process.env.OLLAMA_MODEL || "kimi-k2-thinking:cloud";
+    }
 
     if (!apiKey) {
       return Response.json(
@@ -74,7 +101,7 @@ export async function POST(req: Request) {
     await normalizeToSinglePage(kernel, sessionId);
     const ollama = createOpenAI({
       baseURL: ollamaBaseUrl,
-      apiKey: ollamaApiKey,
+      apiKey: ollamaApiKey || "ollama",
       name: "ollama",
     });
 
@@ -182,6 +209,7 @@ Behavior:
       detailedSteps,
       stepCount: steps.length,
       usage,
+      serverTarget: requestedServerTarget,
     });
   } catch (error: any) {
     console.error("Agent execution error:", error);

@@ -57,6 +57,7 @@ interface AutomationResult {
   timestamp: number;
   error?: string;
   task?: string;
+  serverTarget?: "vps" | "cloud-eu";
 }
 
 export default function HomePage() {
@@ -74,6 +75,8 @@ export default function HomePage() {
   const [deployUrl, setDeployUrl] = useState<string | null>(null);
   const [task, setTask] = useState("Go to https://eburon.ai/ and create a blog post");
   const [stepsOverlayResult, setStepsOverlayResult] = useState<AutomationResult | null>(null);
+  const [showServerSettings, setShowServerSettings] = useState(false);
+  const [serverTarget, setServerTarget] = useState<"vps" | "cloud-eu">("vps");
 
   const totalRuns = automationResults.length;
   const successfulRuns = automationResults.filter((result) => result.success).length;
@@ -145,6 +148,7 @@ export default function HomePage() {
         body: JSON.stringify({
           sessionId: browserSession.sessionId,
           task: task.trim(),
+          serverTarget,
         }),
       });
 
@@ -158,6 +162,7 @@ export default function HomePage() {
         stepCount: data.stepCount,
         error: data.error,
         task: task.trim(),
+        serverTarget: data.serverTarget ?? serverTarget,
         timestamp: Date.now(),
       };
 
@@ -172,6 +177,7 @@ export default function HomePage() {
         success: false,
         error: "Failed to run Eburon agent",
         task: task.trim(),
+        serverTarget,
         timestamp: Date.now(),
       };
       setAutomationResults((prev) => [result, ...prev]);
@@ -419,6 +425,65 @@ export default function HomePage() {
                   <Card>
                     <CardContent>
                       <div className="space-y-4">
+                        <div className="rounded-lg border border-white/10 p-3">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="space-y-1">
+                              <p className="text-sm font-medium">Server</p>
+                              <p className="text-xs text-muted-foreground">
+                                Current:{" "}
+                                <span className="font-medium text-foreground">
+                                  {serverTarget === "vps"
+                                    ? "VPS Self-Hosted"
+                                    : "Cloud Server EU (Ollama Cloud)"}
+                                </span>
+                              </p>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setShowServerSettings((v) => !v)}
+                            >
+                              Server Settings
+                            </Button>
+                          </div>
+
+                          {showServerSettings && (
+                            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                              <button
+                                type="button"
+                                onClick={() => setServerTarget("vps")}
+                                className={`rounded-md border p-3 text-left transition ${
+                                  serverTarget === "vps"
+                                    ? "border-emerald-500 bg-emerald-500/10"
+                                    : "border-white/10 hover:border-white/30"
+                                }`}
+                              >
+                                <p className="text-sm font-medium">VPS Self-Hosted</p>
+                                <p className="text-xs text-muted-foreground">
+                                  Uses OLLAMA_BASE_URL on your own server.
+                                </p>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setServerTarget("cloud-eu")}
+                                className={`rounded-md border p-3 text-left transition ${
+                                  serverTarget === "cloud-eu"
+                                    ? "border-blue-500 bg-blue-500/10"
+                                    : "border-white/10 hover:border-white/30"
+                                }`}
+                              >
+                                <p className="text-sm font-medium">
+                                  Cloud Server EU (Ollama Cloud)
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  Uses OLLAMA_CLOUD_* variables.
+                                </p>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
                         <div className="space-y-2 text-left">
                           <label
                             htmlFor="task-input"
@@ -584,6 +649,13 @@ export default function HomePage() {
                                       <Badge variant="secondary">
                                         {result.stepCount} steps
                                       </Badge>
+                                  {result.serverTarget && (
+                                    <Badge variant="outline">
+                                      {result.serverTarget === "vps"
+                                        ? "VPS"
+                                        : "Cloud EU"}
+                                    </Badge>
+                                  )}
                                       {result.detailedSteps &&
                                         result.detailedSteps.length > 0 && (
                                           <Button
