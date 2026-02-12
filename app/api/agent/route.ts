@@ -1,7 +1,7 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import { playwrightExecuteTool } from "@onkernel/ai-sdk";
 import { Kernel } from "@onkernel/sdk";
-import { Experimental_Agent as Agent, stepCountIs, tool } from "ai";
+import { Experimental_Agent as Agent, stepCountIs, tool, zodSchema } from "ai";
 import { z } from "zod";
 
 export const maxDuration = 300; // 5 minutes timeout for long-running agent operations
@@ -168,24 +168,26 @@ export async function POST(req: Request) {
       name: "ollama",
     });
 
-    const computer_capture_screenshot = tool({
-      description:
-        "Capture a PNG screenshot of the current browser window. Returns a data URL (base64 PNG).",
-      parameters: z.object({
-        region: z
-          .object({
-            x: z.number().int(),
-            y: z.number().int(),
-            width: z.number().int().positive(),
-            height: z.number().int().positive(),
-          })
-          .optional(),
-      }),
-      execute: async ({ region }) => {
-        const response = await kernel.browsers.computer.captureScreenshot(
-          sessionId,
-          region ? { region } : {}
-        );
+	    const computer_capture_screenshot = tool({
+	      description:
+	        "Capture a PNG screenshot of the current browser window. Returns a data URL (base64 PNG).",
+	      inputSchema: zodSchema(
+	        z.object({
+	          region: z
+	            .object({
+	              x: z.number().int(),
+	              y: z.number().int(),
+	              width: z.number().int().positive(),
+	              height: z.number().int().positive(),
+	            })
+	            .optional(),
+	        })
+	      ),
+	      execute: async ({ region }) => {
+	        const response = await kernel.browsers.computer.captureScreenshot(
+	          sessionId,
+	          region ? { region } : {}
+	        );
         const bytes = new Uint8Array(await response.arrayBuffer());
         // Node runtime: Buffer is available.
         const base64 = Buffer.from(bytes).toString("base64");
@@ -196,107 +198,121 @@ export async function POST(req: Request) {
       },
     });
 
-    const computer_move_mouse = tool({
-      description:
-        "Move the host mouse cursor to screen coordinates (x, y) inside the live browser view.",
-      parameters: z.object({
-        x: z.number().int(),
-        y: z.number().int(),
-        hold_keys: z.array(z.string()).optional(),
-      }),
-      execute: async (params) => {
-        await kernel.browsers.computer.moveMouse(sessionId, params);
-        return { ok: true };
-      },
-    });
+	    const computer_move_mouse = tool({
+	      description:
+	        "Move the host mouse cursor to screen coordinates (x, y) inside the live browser view.",
+	      inputSchema: zodSchema(
+	        z.object({
+	          x: z.number().int(),
+	          y: z.number().int(),
+	          hold_keys: z.array(z.string()).optional(),
+	        })
+	      ),
+	      execute: async (params) => {
+	        await kernel.browsers.computer.moveMouse(sessionId, params);
+	        return { ok: true };
+	      },
+	    });
 
-    const computer_click_mouse = tool({
-      description:
-        "Click the mouse at screen coordinates (x, y) inside the live browser view.",
-      parameters: z.object({
-        x: z.number().int(),
-        y: z.number().int(),
-        button: z
-          .enum(["left", "right", "middle", "back", "forward"])
-          .optional(),
-        click_type: z.enum(["down", "up", "click"]).optional(),
-        hold_keys: z.array(z.string()).optional(),
-        num_clicks: z.number().int().positive().optional(),
-      }),
-      execute: async (params) => {
-        await kernel.browsers.computer.clickMouse(sessionId, params);
-        return { ok: true };
-      },
-    });
+	    const computer_click_mouse = tool({
+	      description:
+	        "Click the mouse at screen coordinates (x, y) inside the live browser view.",
+	      inputSchema: zodSchema(
+	        z.object({
+	          x: z.number().int(),
+	          y: z.number().int(),
+	          button: z
+	            .enum(["left", "right", "middle", "back", "forward"])
+	            .optional(),
+	          click_type: z.enum(["down", "up", "click"]).optional(),
+	          hold_keys: z.array(z.string()).optional(),
+	          num_clicks: z.number().int().positive().optional(),
+	        })
+	      ),
+	      execute: async (params) => {
+	        await kernel.browsers.computer.clickMouse(sessionId, params);
+	        return { ok: true };
+	      },
+	    });
 
-    const computer_drag_mouse = tool({
-      description:
-        "Drag the mouse along a path of screen coordinates inside the live browser view.",
-      parameters: z.object({
-        path: z.array(z.array(z.number().int()).length(2)).min(2),
-        button: z.enum(["left", "middle", "right"]).optional(),
-        delay: z.number().int().nonnegative().optional(),
-        hold_keys: z.array(z.string()).optional(),
-        step_delay_ms: z.number().int().nonnegative().optional(),
-        steps_per_segment: z.number().int().min(1).optional(),
-      }),
-      execute: async (params) => {
-        await kernel.browsers.computer.dragMouse(sessionId, params);
-        return { ok: true };
-      },
-    });
+	    const computer_drag_mouse = tool({
+	      description:
+	        "Drag the mouse along a path of screen coordinates inside the live browser view.",
+	      inputSchema: zodSchema(
+	        z.object({
+	          path: z.array(z.array(z.number().int()).length(2)).min(2),
+	          button: z.enum(["left", "middle", "right"]).optional(),
+	          delay: z.number().int().nonnegative().optional(),
+	          hold_keys: z.array(z.string()).optional(),
+	          step_delay_ms: z.number().int().nonnegative().optional(),
+	          steps_per_segment: z.number().int().min(1).optional(),
+	        })
+	      ),
+	      execute: async (params) => {
+	        await kernel.browsers.computer.dragMouse(sessionId, params);
+	        return { ok: true };
+	      },
+	    });
 
-    const computer_scroll = tool({
-      description:
-        "Scroll at screen position (x, y) inside the live browser view.",
-      parameters: z.object({
-        x: z.number().int(),
-        y: z.number().int(),
-        delta_x: z.number().int().optional(),
-        delta_y: z.number().int().optional(),
-        hold_keys: z.array(z.string()).optional(),
-      }),
-      execute: async (params) => {
-        await kernel.browsers.computer.scroll(sessionId, params);
-        return { ok: true };
-      },
-    });
+	    const computer_scroll = tool({
+	      description:
+	        "Scroll at screen position (x, y) inside the live browser view.",
+	      inputSchema: zodSchema(
+	        z.object({
+	          x: z.number().int(),
+	          y: z.number().int(),
+	          delta_x: z.number().int().optional(),
+	          delta_y: z.number().int().optional(),
+	          hold_keys: z.array(z.string()).optional(),
+	        })
+	      ),
+	      execute: async (params) => {
+	        await kernel.browsers.computer.scroll(sessionId, params);
+	        return { ok: true };
+	      },
+	    });
 
-    const computer_type_text = tool({
-      description: "Type text into the focused element in the live browser view.",
-      parameters: z.object({
-        text: z.string(),
-        delay: z.number().int().nonnegative().optional(),
-      }),
-      execute: async (params) => {
-        await kernel.browsers.computer.typeText(sessionId, params);
-        return { ok: true };
-      },
-    });
+	    const computer_type_text = tool({
+	      description: "Type text into the focused element in the live browser view.",
+	      inputSchema: zodSchema(
+	        z.object({
+	          text: z.string(),
+	          delay: z.number().int().nonnegative().optional(),
+	        })
+	      ),
+	      execute: async (params) => {
+	        await kernel.browsers.computer.typeText(sessionId, params);
+	        return { ok: true };
+	      },
+	    });
 
-    const computer_press_key = tool({
-      description:
-        "Press one or more keys in the live browser view (xdotool-style keysyms, e.g. Return, Ctrl+t).",
-      parameters: z.object({
-        keys: z.array(z.string()).min(1),
-        duration: z.number().int().nonnegative().optional(),
-        hold_keys: z.array(z.string()).optional(),
-      }),
-      execute: async (params) => {
-        await kernel.browsers.computer.pressKey(sessionId, params);
-        return { ok: true };
-      },
-    });
+	    const computer_press_key = tool({
+	      description:
+	        "Press one or more keys in the live browser view (xdotool-style keysyms, e.g. Return, Ctrl+t).",
+	      inputSchema: zodSchema(
+	        z.object({
+	          keys: z.array(z.string()).min(1),
+	          duration: z.number().int().nonnegative().optional(),
+	          hold_keys: z.array(z.string()).optional(),
+	        })
+	      ),
+	      execute: async (params) => {
+	        await kernel.browsers.computer.pressKey(sessionId, params);
+	        return { ok: true };
+	      },
+	    });
 
-    const computer_set_cursor_visibility = tool({
-      description: "Show or hide the host cursor in the live browser view.",
-      parameters: z.object({
-        hidden: z.boolean(),
-      }),
-      execute: async (params) => {
-        return await kernel.browsers.computer.setCursorVisibility(
-          sessionId,
-          params
+	    const computer_set_cursor_visibility = tool({
+	      description: "Show or hide the host cursor in the live browser view.",
+	      inputSchema: zodSchema(
+	        z.object({
+	          hidden: z.boolean(),
+	        })
+	      ),
+	      execute: async (params) => {
+	        return await kernel.browsers.computer.setCursorVisibility(
+	          sessionId,
+	          params
         );
       },
     });

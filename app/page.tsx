@@ -33,6 +33,22 @@ import { StepsOverlay } from "@/components/StepsOverlay";
 import { DesktopEnvironment } from "@/components/DesktopEnvironment";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 
+interface OpenClawSkill {
+  name: string;
+  description?: string;
+  emoji?: string;
+  eligible?: boolean;
+  disabled?: boolean;
+  blockedByAllowlist?: boolean;
+  missing?: {
+    bins?: string[];
+    anyBins?: string[];
+    env?: string[];
+    config?: string[];
+    os?: string[];
+  };
+}
+
 interface BrowserSession {
   sessionId: string;
   liveViewUrl: string;
@@ -97,6 +113,17 @@ export default function HomePage() {
   const [activeTab, setActiveTab] = useState<"chat" | "hub">("chat");
   const [taskSnapshot, setTaskSnapshot] = useState("");
   const [isOptimizing, setIsOptimizing] = useState(false);
+  const [cursorPosition, setCursorPosition] = useState<{ x: number; y: number } | null>(null);
+  const [openClawSkills, setOpenClawSkills] = useState<OpenClawSkill[] | null>(
+    null
+  );
+  const [openClawSkillsWorkspace, setOpenClawSkillsWorkspace] = useState<
+    string | null
+  >(null);
+  const [openClawSkillsLoading, setOpenClawSkillsLoading] = useState(false);
+  const [openClawSkillsError, setOpenClawSkillsError] = useState<string | null>(
+    null
+  );
 
   const {
     isListening,
@@ -137,6 +164,39 @@ export default function HomePage() {
     { name: "Documents", icon: FileText, color: "bg-blue-400", prompt: "Go to docs.google.com/document" },
     { name: "YouTube", icon: Play, color: "bg-red-600", prompt: "Go to youtube.com." },
   ];
+
+  const loadOpenClawSkills = async () => {
+    if (openClawSkillsLoading) return;
+    setOpenClawSkillsLoading(true);
+    setOpenClawSkillsError(null);
+    try {
+      const res = await fetch("/api/openclaw/skills", {
+        method: "GET",
+        headers: { Accept: "application/json" },
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || "Failed to load skills");
+      }
+      setOpenClawSkills(Array.isArray(data.skills) ? data.skills : []);
+      setOpenClawSkillsWorkspace(
+        typeof data.workspaceDir === "string" ? data.workspaceDir : null
+      );
+    } catch (e) {
+      setOpenClawSkills(null);
+      setOpenClawSkillsWorkspace(null);
+      setOpenClawSkillsError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setOpenClawSkillsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === "hub" && openClawSkills === null) {
+      loadOpenClawSkills();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   // Load saved state and check for active session on mount
   useState(() => {
@@ -360,11 +420,21 @@ export default function HomePage() {
 
           if (event === "tool-call" || event === "step-finish") {
             if (data?.toolName) {
-              const logLine = `\n> [Action] Running ${data.toolName}...\n`;
+              const toolName = data.toolName;
+              const args = data.args || {};
+
+              // Map coordination tools to visual cursor
+              if (toolName.includes("mouse") || toolName.includes("scroll") || toolName.includes("click")) {
+                if (typeof args.x === 'number' && typeof args.y === 'number') {
+                  setCursorPosition({ x: args.x, y: args.y });
+                }
+              }
+
+              const logLine = `\n> [Action] ${toolName}...\n`;
               setAutomationResults((prev) => {
                 const newResults = prev.map((r) =>
                   r.timestamp === runTimestamp
-                    ? { ...r, response: (r.response ?? "") + logLine }
+                    ? { ...r, response: (r.response ?? "") + logLine, args: args }
                     : r
                 );
                 if (typeof window !== "undefined") localStorage.setItem("automationResults", JSON.stringify(newResults));
@@ -675,7 +745,7 @@ export default function HomePage() {
                 <div className="flex flex-col lg:grid lg:grid-cols-[380px_1fr] lg:gap-4 lg:h-[calc(100vh-5rem)] space-y-6 lg:space-y-0">
 
                   {/* ── LEFT PANEL (Tabbed Interface) ── */}
-                  <div className="order-2 lg:order-1 flex flex-col lg:h-[calc(100vh-5rem)] border-t lg:border-t-0 lg:border-r bg-background lg:overflow-hidden">
+                  <div className="order-2 lg:order-1 flex flex-col lg:h-[calc(100vh-5rem)] border-t lg:border-t-0 lg:border-r bg-background lg:overflow-hidden min-h-[500px] lg:min-h-0">
 
                     {/* Header: Title + Settings + Stats */}
                     <div className="flex flex-col border-b shrink-0 bg-muted/5">
@@ -876,26 +946,113 @@ export default function HomePage() {
                           ))}
                         </div>
                       ) : (
-                        <div className="p-4 grid grid-cols-4 gap-4 align-start content-start">
-                          {APPS.map((app) => (
-                            <button
-                              key={app.name}
-                              onClick={() => {
-                                setTask(app.prompt);
-                                setActiveTab("chat");
-                                // We don't auto-run to avoid accidental clicks, user can press enter/run.
-                                // Or we could suggest it.
-                              }}
-                              className="group flex flex-col items-center gap-2"
-                            >
-                              <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg transition-transform group-hover:scale-105 group-active:scale-95 text-white ${app.color}`}>
-                                <app.icon className="w-7 h-7" />
+                        <div className="p-4 space-y-4">
+                          <div className="flex items-center justify-between">
+                            <div className="space-y-0.5">
+                              <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                OpenClaw Skills
                               </div>
-                              <span className="text-[10px] font-medium text-center leading-tight line-clamp-1">
-                                {app.name}
-                              </span>
-                            </button>
-                          ))}
+                              {openClawSkillsWorkspace && (
+                                <div className="text-[10px] text-muted-foreground font-mono truncate max-w-[260px]">
+                                  {openClawSkillsWorkspace}
+                                </div>
+                              )}
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={loadOpenClawSkills}
+                              className="h-7 text-[10px]"
+                              disabled={openClawSkillsLoading}
+                            >
+                              {openClawSkillsLoading ? (
+                                <>
+                                  <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                  Loading
+                                </>
+                              ) : (
+                                "Refresh"
+                              )}
+                            </Button>
+                          </div>
+
+                          {openClawSkillsError && (
+                            <div className="text-xs text-red-500 bg-red-500/10 p-2 rounded">
+                              {openClawSkillsError}
+                            </div>
+                          )}
+
+                          {openClawSkillsLoading && openClawSkills === null && (
+                            <div className="text-xs text-muted-foreground">
+                              Loading skills…
+                            </div>
+                          )}
+
+                          {openClawSkills && (
+                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 align-start content-start">
+                              {openClawSkills.map((skill) => {
+                                const eligible = skill.eligible === true;
+                                const disabled = skill.disabled === true;
+                                const statusStyles = disabled
+                                  ? "opacity-40"
+                                  : eligible
+                                    ? "border-emerald-500/20 bg-emerald-500/5 hover:bg-emerald-500/10"
+                                    : "border-amber-500/20 bg-amber-500/5 hover:bg-amber-500/10";
+
+                                return (
+                                  <button
+                                    key={skill.name}
+                                    title={skill.description || skill.name}
+                                    onClick={() => {
+                                      const desc = skill.description?.trim();
+                                      setTask(
+                                        desc ? `${skill.name}: ${desc}` : skill.name
+                                      );
+                                      setActiveTab("chat");
+                                    }}
+                                    className={`group flex flex-col items-center gap-2 p-2 rounded-xl border transition-colors ${statusStyles}`}
+                                  >
+                                    <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm bg-background/60 border border-border/40 transition-transform group-hover:scale-105 group-active:scale-95">
+                                      <span className="text-2xl leading-none">
+                                        {skill.emoji || "🧰"}
+                                      </span>
+                                    </div>
+                                    <span className="text-[10px] font-medium text-center leading-tight line-clamp-1">
+                                      {skill.name}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+
+                          <div className="pt-3 border-t border-border/40">
+                            <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+                              Quick Apps
+                            </div>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 align-start content-start">
+                              {APPS.map((app) => (
+                                <button
+                                  key={app.name}
+                                  onClick={() => {
+                                    setTask(app.prompt);
+                                    setActiveTab("chat");
+                                    // We don't auto-run to avoid accidental clicks, user can press enter/run.
+                                  }}
+                                  className="group flex flex-col items-center gap-2"
+                                >
+                                  <div
+                                    className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg transition-transform group-hover:scale-105 group-active:scale-95 text-white ${app.color}`}
+                                  >
+                                    <app.icon className="w-7 h-7" />
+                                  </div>
+                                  <span className="text-[10px] font-medium text-center leading-tight line-clamp-1">
+                                    {app.name}
+                                  </span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -992,14 +1149,14 @@ export default function HomePage() {
                     </div>
                   </div>
 
-                  {/* ── RIGHT PANEL (browser iframe) ── */}
-                  {/* ── RIGHT PANEL (browser iframe) ── */}
-                  <div className="order-1 lg:order-2 lg:min-h-0 lg:h-full">
+                  {/* ── RIGHT PANEL (Browser / Desktop) ── */}
+                  <div className="order-1 lg:order-2 w-full aspect-video lg:aspect-auto lg:h-full lg:min-h-0">
                     {browserSession ? (
                       <DesktopEnvironment
                         browserSession={browserSession}
                         automationResults={automationResults}
                         isSessionActive={!!browserSession}
+                        cursorPosition={cursorPosition}
                       />
                     ) : (
                       <Card className="h-full bg-muted/10 border-dashed">
